@@ -28,7 +28,6 @@ public:
 	boolean readTeleInfo();
 	boolean isFrameAvailable();
 	void displayTeleInfo();
-	void resetData();
 	void setDebug(boolean d);
 	
 private :
@@ -36,6 +35,7 @@ private :
 	byte state;				//Etat courant
 	boolean debug;
 
+	void resetData();
 	void handleGroup();
 	
 	char* ADCO;				// adresse compteur

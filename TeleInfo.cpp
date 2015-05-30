@@ -1,229 +1,194 @@
-//=================================================================================================================
-// The TeleInfo is a class that stores the data retrieved from the teleinfo frames, and displays them on a LCD
-// Various displays are available : 
-//     + Instant values : Actual color, actual mode, instant current, actual color counter, instant power
-//     + To morrow color : Actual color and to morrow color when known
-//     + A display for each color (blue, white, red) and both modes (HC, HP)
-//
-// The various displays can be directly selected by pressing the buttons placed below the LCD, so button handling
-// routine that generates interrupts is also part of this class
-//
-//=================================================================================================================
 #include "TeleInfo.h"
 
-//=================================================================================================================
-// Basic constructor
-//=================================================================================================================
-TeleInfo::TeleInfo(byte rxPin, byte txPin)
-{
- //  Serial.begin(1200,SERIAL_7E1);
-  mySerial = new SoftwareSerial(rxPin,txPin); // RX, TX
-  mySerial->begin(1200);
+char etiquette[9];
+char data[13];
+char checksum;
+int charIdx;
 
-  // variables initializations
-  ADCO = "031328141543";
-  OPTARIF = "----";
-  ISOUSC = 0;
-  BBRHCJB = 0L;  // compteur Heures Creuses Bleu  en W
-  BBRHPJB = 0L;  // compteur Heures Pleines Bleu  en W
-  BBRHCJW = 0L;  // compteur Heures Creuses Blanc en W
-  BBRHPJW = 0L;  // compteur Heures Pleines Blanc en W
-  BBRHCJR = 0L;  // compteur Heures Creuses Rouge en W
-  BBRHPJR = 0L;  // compteur Heures Pleines Rouge en W
-  PTEC = "----";    // Régime actuel : HPJB, HCJB, HPJW, HCJW, HPJR, HCJR
-  DEMAIN = "----";  // Régime demain ; ----, BLEU, BLAN, ROUG
-  HHPHC = '-';
-  IINST = 0;        // intensité instantanée en A
-  IMAX = 0;         // intensité maxi en A
-  PAPP = 0;         // puissance apparente en VA
-  MOTDETAT = "------";
+//=================================================================================================================
+// Constructeur
+//=================================================================================================================
+TeleInfo::TeleInfo(byte rxPin, byte txPin){
+	mySerial = new SoftwareSerial(rxPin,txPin); // RX, TX
+	mySerial->begin(1200);
+
+	debug = false;
+
+	state = STATE_IDLE;
+
+	ADCO = new char[13];
+	OPTARIF = new char[5];
+	PTEC = new char[5];
+	DEMAIN = new char[5];
+	MOTDETAT = new char[7];
+
+	resetData();
+}
+
+/**
+ * Réinitialise les données
+ */
+void TeleInfo::resetData(){
+	ADCO = "";		// adresse compteur
+	OPTARIF = "";		// option tarifaire
+	ISOUSC = -1;		// intensité souscrite (A)
+	BASE = -1;		// compteur option Base (Wh)
+	HCHC = -1;		// compteur HC  heure pleine (Wh)
+	HCHP = -1;		// compteur HC  heure creuse (Wh)
+	EJPHN = -1;		// compteur EJP heures normales (Wh)
+	EJPHPM = -1;		// compteur EJP heures de pointe (Wh)
+	BBRHCJB = -1;		// compteur TEMPO Heures Creuses Bleu (Wh)
+	BBRHPJB = -1;		// compteur TEMPO Heures Pleines Bleu (Wh)
+	BBRHCJW = -1;		// compteur TEMPO Heures Creuses Blanc (Wh)
+	BBRHPJW = -1;		// compteur TEMPO Heures Pleines Blanc (Wh)
+	BBRHCJR = -1;		// compteur TEMPO Heures Creuses Rouge (Wh)
+	BBRHPJR = -1;		// compteur TEMPO Heures Pleines Rouge (Wh)
+	PEJP = -1;		// préavis debut EJP (min, 30 max)
+	PTEC = "";		// Période tarifaire en cours : HPJB, HCJB, HPJW, HCJW, HPJR, HCJR
+	DEMAIN = "";		// Couleur du lendemain (BLEU,BLAN,ROUG)
+	IINST = -1;		// intensité instantanée(A)
+	ADPS = -1;		// Avertissement dépassement de puissance souscrite (A)
+	IMAX = -1;		// intensité maxi appelée (A)
+	HHPHC = -1;		// Horaire heure pleine heure creuse
+	MOTDETAT = ""; 			
+	PAPP = -1;		// Puissance apparente
 }
 
 //=================================================================================================================
 // Capture des trames de Teleinfo
 //=================================================================================================================
-boolean TeleInfo::readTeleInfo()
-{
-#define startFrame 0x02
-#define endFrame 0x03
-#define startLine 0x0A
-#define endLine 0x0D
-#define maxFrameLen 280
+boolean TeleInfo::readTeleInfo(){
+	char charIn=0;
 
-  int comptChar=0; // variable de comptage des caractères reçus 
-  char charIn=0; // variable de mémorisation du caractère courant en réception
+	// tant que des octets sont disponibles en lecture : on lit les caractères
+	// Il est possible que la lecture ait commencé dans un appel précédent de la methode
+	while (mySerial->available()) {
+		charIn = mySerial->read() & 0x7F;
+		if(debug) Serial.print(charIn);
 
-  char bufferTeleinfo[21] = "";
-  int bufferLen = 0;
-  int checkSum;
+		switch(charIn){
+			case START_FRAME:
+				if(state != STATE_IDLE && state != STATE_FRAME_AVAILABLE) Serial.print("WARNING: START_FRAME en etat "); Serial.println(state);
+				//On initialise les variables pour la Frame
+				resetData();
+				state = STATE_FRAME_STARTED;
+				break;
+			case START_GROUP:
+				etiquette[0] = '\0';
+				data[0] = '\0';
+				checksum = 0;
+				charIdx = 0;
+				state = STATE_READ_ETIQUETTE;
+				break;
+			case CHAR_SEPARATEUR:
+				switch(state){
+					case STATE_READ_ETIQUETTE:
+						state = STATE_READ_DATA;
+						charIdx = 0;
+						checksum += charIn;	//Le separateur fait partie du checksum
+						break;
+					case STATE_READ_DATA:
+						state = STATE_READ_CHECKSUM;
+						charIdx = 0;	
+						break;
+					default:
+						Serial.print("WARNING: separateur en etat "); Serial.println(state);
+						break;
+				}
+				break;
+			case END_GROUP:
+				state = STATE_GROUP_END;
+				//Serial.print("Received group: "); Serial.print(etiquette); Serial.print(":"); Serial.println(data);
+				break;
+			case END_FRAME:
+				state = STATE_FRAME_AVAILABLE;
+				//la trame est prete à être utilisée
+				Serial.println("FRAME END RECEIVED");
+				break;
+			case END_OF_TEXT:
+				Serial.println("FRAME INTERRUPTED");
+				state = STATE_IDLE;
+				break;
+			default:
+				//C'est un autre caratere (etiquette, donne ou checksum)
+				switch(state){
+					case STATE_READ_ETIQUETTE:
+						if(charIdx>=8){
+							Serial.print("WARNING: etiquette overflow: "); Serial.println(etiquette);
+							continue;
+						}
+						etiquette[charIdx++] = charIn;
+						etiquette[charIdx] = '\0';
+						checksum += charIn;
+						break;
+					case STATE_READ_DATA:
+						if(charIdx>=12){
+							Serial.print("WARNING: data overflow: "); Serial.println(etiquette);
+							continue;
+						}
+						data[charIdx++] = charIn;
+						data[charIdx] = '\0';
+						checksum += charIn;
+						break;
+					case STATE_READ_CHECKSUM:
+						//on vérifie le checksum
+						checksum = (checksum & 0x03F) +0x20;	//On ne conserve que les 6 bits de poids faible dans le checksum
+						if(checksum != charIn){
+							Serial.print("Checksum ERROR"); Serial.print(charIn); Serial.print("!="); Serial.println(checksum);
+							state = STATE_ERROR;
+						}
+						break;
+					default:
+						//On ignore les caracteres recus dans les autres etats (mais ce n'est pas normal)
+						break;
+				}
+				break;
+		}
+	}
+	
+	//En retour, on indique si une trame est prete
+	return isFrameAvailable();
+}
 
-  //--- wait for starting frame character 
-  while (charIn != startFrame){ 
-    // "Start Text" STX (002 h) is the beginning of the frame
-    if (mySerial->available())
-      charIn = mySerial->read() & 0x7F; // Serial.read() vide buffer au fur et à mesure
-  }
-  
-  int sequenceNumnber= 0;    // number of information group
-
-  //  while (charIn != endFrame and comptChar<=maxFrameLen)
-  while (charIn != endFrame) {
-    // tant que des octets sont disponibles en lecture : on lit les caractères
-    if (mySerial->available()) {
-      charIn = mySerial->read()& 0x7F;
-      Serial.print(charIn);
-      // incrémente le compteur de caractère reçus
-      comptChar++;
-      if (comptChar > maxFrameLen)
-        return false;
-      if (charIn == startLine)
-        bufferLen = 0;
-      bufferTeleinfo[bufferLen] = charIn;
-      // on utilise une limite max pour éviter String trop long en cas erreur réception
-      // ajoute le caractère reçu au String pour les N premiers caractères
-      if (charIn == endLine) {
-        checkSum = bufferTeleinfo[bufferLen -1];
-        if (chksum(bufferTeleinfo, bufferLen) == checkSum) {
-          // we clear the 1st character
-          strncpy(&bufferTeleinfo[0], &bufferTeleinfo[1], bufferLen -3);
-          bufferTeleinfo[bufferLen -3] =  0x00;
-          sequenceNumnber++;
-          if (! handleBuffer(bufferTeleinfo, sequenceNumnber))
-            return false;
-        }
-        else
-          return false;
-      }
-      else
-        bufferLen++;
-    }
-  }
-  return true;
+/*
+ * Indique si une trame est prête à être utilisée
+ */
+boolean TeleInfo::isFrameAvailable(){
+	return state == STATE_FRAME_AVAILABLE;
 }
 
 //=================================================================================================================
 // Frame parsing
 //=================================================================================================================
-//void handleBuffer(char *bufferTeleinfo, uint8_t len)
-boolean TeleInfo::handleBuffer(char *bufferTeleinfo, int sequenceNumnber)
-{
-  // create a pointer to the first char after the space
-  char* resultString = strchr(bufferTeleinfo,' ') + 1;
-  boolean sequenceIsOK;
-
-  switch(sequenceNumnber)
-  {
-  case 1:
-    //  ADCO 031328141543 :
-    if (sequenceIsOK = bufferTeleinfo[0]=='A')
-      ADCO = String(resultString);
-    break;
-  case 2:
-    // OPTARIF BBR( S
-    // OPTARIF HC.. <
-    if (sequenceIsOK = bufferTeleinfo[0]=='O')
-      OPTARIF = String(resultString);
-    break;
-  case 3:
-    // ISOUSC 45 ?
-    if (sequenceIsOK = bufferTeleinfo[1]=='S')
-      ISOUSC = atol(resultString);
-    break;
-  case 4:
-    // BBRHCJB 000010828 0
-    // HCHC 014460852 $
-    if (sequenceIsOK = bufferTeleinfo[6]=='B')
-      BBRHCJB = atol(resultString);
-    break;
-  case 5:
-    // BBRHPJB 000007345 =
-    // HCHP 012506372 -
-    if (sequenceIsOK = bufferTeleinfo[4]=='P')
-      BBRHPJB = atol(resultString);
-    break;
-  case 6:
-    // BBRHCJW 000000000 2
-    // *
-    if (sequenceIsOK = bufferTeleinfo[6]=='W')
-      BBRHCJW = atol(resultString);
-    break;
-  case 7:
-    // BBRHPJW 000000000 ?
-    // *
-    if (sequenceIsOK = bufferTeleinfo[4]=='P')
-      BBRHPJW = atol(resultString);
-    break;
-  case 8:
-    // BBRHCJR 000000000 -
-    // *
-    if (sequenceIsOK = bufferTeleinfo[6]=='R')
-      BBRHCJR = atol(resultString);
-    break;
-  case 9:
-    // BBRHPJR 000000000 :
-    // *
-    if (sequenceIsOK = bufferTeleinfo[4]=='P')
-      BBRHPJR = atol(resultString);
-    break;
-  case 10:
-    // PTEC HPJB P
-    if (sequenceIsOK = bufferTeleinfo[1]=='T')
-      PTEC = String(resultString);
-    break;
-  case 11:
-    // DEMAIN ---- "
-    // *
-    if (sequenceIsOK = bufferTeleinfo[1]=='E')
-      DEMAIN = String(resultString);
-    break;
-  case 12:
-    // IINST 002 Y
-    if (sequenceIsOK = bufferTeleinfo[1]=='I')
-      IINST =atol(resultString);
-    break;
-  case 13:
-    // IMAX 030 B
-    if (sequenceIsOK = bufferTeleinfo[1]=='M')
-      IMAX =atol(resultString);
-    break;
-  case 14:
-    // PAPP 00430 (
-    if (sequenceIsOK = bufferTeleinfo[1]=='A')
-      PAPP =atol(resultString);
-    break;
-  case 15:
-    // HHPHC Y D
-    if (sequenceIsOK = bufferTeleinfo[1]=='H')
-      HHPHC = resultString[0];
-    break;
-  case 16:
-    // MOTDETAT 000000 B
-    if (sequenceIsOK = bufferTeleinfo[1]=='O')
-      MOTDETAT = String(resultString);
-    break;
-  }
-#ifdef debug
-  if(!sequenceIsOK)
-  {
-    Serial.print(F("Out of sequence ..."));
-    Serial.println(bufferTeleinfo);
-    Serial.print(F("\n"));
-  }
-#endif
-  return sequenceIsOK;
-}
-
-//=================================================================================================================
-// Calculates teleinfo Checksum
-//=================================================================================================================
-char TeleInfo::chksum(char *buff, uint8_t len)
-{
-  int i;
-  char sum = 0;
-  for (i=1; i<(len-2); i++) 
-    sum = sum + buff[i];
-  sum = (sum & 0x3F) + 0x20;
-  return(sum);
+void TeleInfo::handleGroup(){
+	free(ADCO);
+	free(OPTARIF);
+	free(PTEC);
+	free(DEMAIN);
+	free(MOTDETAT);
+	if(strcmp(etiquette,"ADCO")    == 0) ADCO    = strdup(data);	// adresse compteur
+	if(strcmp(etiquette,"OPTARIF") == 0) OPTARIF = strdup(data);	// option tarifaire
+	if(strcmp(etiquette,"ISOUSC")  == 0) ISOUSC  = atol(data);	// intensité souscrite (A)
+	if(strcmp(etiquette,"BASE")    == 0) BASE    = atol(data);	// compteur option Base (Wh)
+	if(strcmp(etiquette,"HCHC")    == 0) HCHC    = atol(data);	// compteur HC  heure pleine (Wh)
+	if(strcmp(etiquette,"HCHP")    == 0) HCHP    = atol(data);	// compteur HC  heure creuse (Wh)
+	if(strcmp(etiquette,"EJPHN")   == 0) EJPHN   = atol(data);	// compteur EJP heures normales (Wh)
+	if(strcmp(etiquette,"EJPHPM")  == 0) EJPHPM  = atol(data);	// compteur EJP heures de pointe (Wh)
+	if(strcmp(etiquette,"BBRHCJB") == 0) BBRHCJB = atol(data);	// compteur TEMPO Heures Creuses Bleu (Wh)
+	if(strcmp(etiquette,"BBRHPJB") == 0) BBRHPJB = atol(data);	// compteur TEMPO Heures Pleines Bleu (Wh)
+	if(strcmp(etiquette,"BBRHCJW") == 0) BBRHCJW = atol(data);	// compteur TEMPO Heures Creuses Blanc (Wh)
+	if(strcmp(etiquette,"BBRHPJW") == 0) BBRHPJW = atol(data);	// compteur TEMPO Heures Pleines Blanc (Wh)
+	if(strcmp(etiquette,"BBRHCJR") == 0) BBRHCJR = atol(data);	// compteur TEMPO Heures Creuses Rouge (Wh)
+	if(strcmp(etiquette,"BBRHPJR") == 0) BBRHPJR = atol(data);	// compteur TEMPO Heures Pleines Rouge (Wh)
+	if(strcmp(etiquette,"PEJP")    == 0) PEJP    = atol(data);	// préavis debut EJP (min, 30 max)
+	if(strcmp(etiquette,"PTEC")    == 0) PTEC    = strdup(data);	// Période tarifaire en cours : HPJB, HCJB, HPJW, HCJW, HPJR, HCJR
+	if(strcmp(etiquette,"DEMAIN")  == 0) DEMAIN  = strdup(data);	// Couleur du lendemain (BLEU,BLAN,ROUG)
+	if(strcmp(etiquette,"IINST")   == 0) IINST   = atol(data);	// intensité instantanée(A)
+	if(strcmp(etiquette,"ADPS")    == 0) ADPS    = atol(data);	// Avertissement dépassement de puissance souscrite (A)
+	if(strcmp(etiquette,"IMAX")    == 0) IMAX    = atol(data);	// intensité maxi appelée (A)
+	if(strcmp(etiquette,"HHPHC")   == 0) HHPHC   = data[0];		// Horaire heure pleine heure creuse
+	if(strcmp(etiquette,"MOTDETAT")== 0) MOTDETAT= strdup(data); 			
+	if(strcmp(etiquette,"PAPP")    == 0) PAPP    = atol(data);	// Puissance apparente
 }
 
 //=================================================================================================================
@@ -232,41 +197,31 @@ char TeleInfo::chksum(char *buff, uint8_t len)
 //=================================================================================================================
 void TeleInfo::displayTeleInfo()
 {
-#ifdef debug
-  Serial.print(F(" "));
-  Serial.println();
-  Serial.print(F("ADCO "));
-  Serial.println(ADCO);
-  Serial.print(F("OPTARIF "));
-  Serial.println(OPTARIF);
-  Serial.print(F("ISOUSC "));
-  Serial.println(ISOUSC);
-  Serial.print(F("BBRHCJB "));
-  Serial.println(BBRHCJB);
-  Serial.print(F("BBRHPJB "));
-  Serial.println(BBRHPJB);
-  Serial.print(F("BBRHCJW "));
-  Serial.println(BBRHCJW);
-  Serial.print(F("BBRHPJW "));
-  Serial.println(BBRHPJW);
-  Serial.print(F("BBRHCJR "));
-  Serial.println(BBRHCJR);
-  Serial.print(F("BBRHPJR "));
-  Serial.println(BBRHPJR);
-  Serial.print(F("PTEC "));
-  Serial.println(PTEC);
-  Serial.print(F("DEMAIN "));
-  Serial.println(DEMAIN);
-  Serial.print(F("IINST "));
-  Serial.println(IINST);
-  Serial.print(F("IMAX "));
-  Serial.println(IMAX);
-  Serial.print(F("PAPP "));
-  Serial.println(PAPP);
-  Serial.print(F("HHPHC "));
-  Serial.println(HHPHC);
-  Serial.print(F("MOTDETAT "));
-  Serial.println(MOTDETAT);
-#endif
+	if(ADCO[0]    != '\0') Serial.print("ADCO    ="); Serial.println(ADCO);		// adresse compteur
+	if(OPTARIF[0] != '\0') Serial.print("OPTARIF ="); Serial.println(OPTARIF);	// option tarifaire
+	if(ISOUSC     >= 0)    Serial.print("ISOUSC  ="); Serial.println(ISOUSC); 	// intensité souscrite (A)
+	if(BASE       >= 0)    Serial.print("BASE    ="); Serial.println(BASE);		// compteur option Base (Wh)
+	if(HCHC       >= 0)    Serial.print("HCHC    ="); Serial.println(HCHC);		// compteur HC  heure pleine (Wh)
+	if(HCHP       >= 0)    Serial.print("HCHP    ="); Serial.println(HCHP);		// compteur HC  heure creuse (Wh)
+	if(EJPHN      >= 0)    Serial.print("EJPHN   ="); Serial.println(EJPHN);	// compteur EJP heures normales (Wh)
+	if(EJPHPM     >= 0)    Serial.print("EJPHPM  ="); Serial.println(EJPHPM);	// compteur EJP heures de pointe (Wh)
+	if(BBRHCJB    >= 0)    Serial.print("BBRHCJB ="); Serial.println(BBRHCJB);	// compteur TEMPO Heures Creuses Bleu (Wh)
+	if(BBRHPJB    >= 0)    Serial.print("BBRHPJB ="); Serial.println(BBRHPJB);	// compteur TEMPO Heures Pleines Bleu (Wh)
+	if(BBRHCJW    >= 0)    Serial.print("BBRHCJW ="); Serial.println(BBRHCJW);	// compteur TEMPO Heures Creuses Blanc (Wh)
+	if(BBRHPJW    >= 0)    Serial.print("BBRHPJW ="); Serial.println(BBRHPJW);	// compteur TEMPO Heures Pleines Blanc (Wh)
+	if(BBRHCJR    >= 0)    Serial.print("BBRHCJR ="); Serial.println(BBRHCJR);	// compteur TEMPO Heures Creuses Rouge (Wh)
+	if(BBRHPJR    >= 0)    Serial.print("BBRHPJR ="); Serial.println(BBRHPJR);	// compteur TEMPO Heures Pleines Rouge (Wh)
+	if(PEJP       >= 0)    Serial.print("PEJP    ="); Serial.println(PEJP);		// préavis debut EJP (min, 30 max)
+	if(PTEC[0]    != '\0') Serial.print("PTEC    ="); Serial.println(PTEC);		// Période tarifaire en cours : HPJB, HCJB, HPJW, HCJW, HPJR, HCJR
+	if(DEMAIN[0]  != '\0') Serial.print("DEMAIN  ="); Serial.println(DEMAIN);	// Couleur du lendemain (BLEU,BLAN,ROUG)
+	if(IINST      >= 0)    Serial.print("IINST   ="); Serial.println(IINST);	// intensité instantanée(A)
+	if(ADPS       >= 0)    Serial.print("ADPS    ="); Serial.println(ADPS);		// Avertissement dépassement de puissance souscrite (A)
+	if(IMAX       >= 0)    Serial.print("IMAX    ="); Serial.println(IMAX);		// intensité maxi appelée (A)
+	if(HHPHC      >= 0)    Serial.print("HHPHC   ="); Serial.println(HHPHC);	// Horaire heure pleine heure creuse
+	if(MOTDETAT[0]!= '\0') Serial.print("MOTDETAT="); Serial.println(MOTDETAT); 			
+	if(PAPP       >= 0)    Serial.print("PAPP    ="); Serial.println(PAPP);		// Puissance apparente (W)
 }
 
+void TeleInfo::setDebug(boolean d){
+	debug = d;
+}

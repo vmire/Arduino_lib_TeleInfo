@@ -1,5 +1,7 @@
 TeleInfo KEYWORD1
 readTeleInfo KEYWORD2
 displayTeleInfo KEYWORD2
+isFrameAvailable KEYWORD2
+setDebug KEYWORD2
 
 DUMMY_LITERAL	LITERAL1

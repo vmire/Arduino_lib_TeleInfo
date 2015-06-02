@@ -29,17 +29,13 @@ public:
 	boolean isFrameAvailable();
 	void displayTeleInfo();
 	void setDebug(boolean d);
-	
-private :
-	SoftwareSerial* mySerial;
-	byte state;				//Etat courant
-	boolean debug;
-
 	void resetData();
-	void handleGroup();
 	
+	/*
+	 * Les données
+	 */	
 	char* ADCO;				// adresse compteur
-	char* OPTARIF;				// option tarifaire
+	char* OPTARIF;				// option tarifaire : BASE / HC.. / EJP. / BBRx
 	int ISOUSC;				// intensité souscrite (A)
 	long BASE;				// compteur option Base (Wh)
 	long HCHC;				// compteur HC  heure pleine (Wh)
@@ -60,6 +56,27 @@ private :
 	int IMAX;				// intensité maxi appelée (A)
 	char HHPHC;				// Horaire heure pleine heure creuse
 	char* MOTDETAT;				// Mode etat du compteur
-	int PAPP;				// Puissance apparene
+	int PAPP;				// Puissance apparente (VA) (seulement sur compteurs evolution)
+
+	//Pour les compteurs triphasés / trames longues
+	int IINST2;				// intensité instantanée(A) phase 2
+	int IINST3;				// intensité instantanée(A) phase 3
+	int IMAX2;				// intensité maxi appelée (A) phase 2
+	int IMAX3;				// intensité maxi appelée (A) phase 3
+	char* PPOT;				// Présence des potentiels codage hexa (voir doc)
+
+	//Triphasé / trames courtes : ADIR1 ADIR2 ADIR3 ADCO IINST1 IINST2 IINST3
+	// Lorsqu'il y a un dépassement, 20 trames courtes sont émises pour une trame longue
+	int ADIR1;				// Avertissement dépassement d'intensité de réglage phase 1 (A)
+	int ADIR2;				// Avertissement dépassement d'intensité de réglage phase 2 (A)
+	int ADIR3;				// Avertissement dépassement d'intensité de réglage phase 3 (A)
+private :
+	SoftwareSerial* mySerial;
+	byte state;				//Etat courant
+	boolean debug;
+
+	void handleGroup();
+
+	
 };
 #endif

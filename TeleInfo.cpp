@@ -73,15 +73,23 @@ void TeleInfo::resetData(){
 boolean TeleInfo::readTeleInfo(){
 	char charIn=0;
 
+	if(mySerial->overflow()){
+		//SoftwareSerial overflow. On réinitialise au préalable
+		resetData();
+	}
+	
 	// tant que des octets sont disponibles en lecture : on lit les caractères
 	// Il est possible que la lecture ait commencé dans un appel précédent de la methode
 	while (mySerial->available()) {
 		charIn = mySerial->read() & 0x7F;
-		if(debug) Serial.print(charIn);
+		if(state == STATE_IDLE && charIn != START_FRAME){
+			//La frame n'est pas commencée
+			continue;
+		}
 
 		switch(charIn){
 			case START_FRAME:
-				if(state != STATE_IDLE && state != STATE_FRAME_AVAILABLE) Serial.print("WARNING: START_FRAME en etat "); Serial.println(state);
+				if(state != STATE_IDLE && state != STATE_FRAME_AVAILABLE){ Serial.print("WARNING: START_FRAME en etat "); Serial.println(state); }
 				//On initialise les variables pour la Frame
 				resetData();
 				state = STATE_FRAME_STARTED;
@@ -105,7 +113,7 @@ boolean TeleInfo::readTeleInfo(){
 						charIdx = 0;	
 						break;
 					default:
-						Serial.print("WARNING: separateur en etat "); Serial.println(state);
+						//Serial.print("WARNING: separateur en etat "); Serial.println(state);
 						break;
 				}
 				break;
@@ -117,10 +125,10 @@ boolean TeleInfo::readTeleInfo(){
 			case END_FRAME:
 				state = STATE_FRAME_AVAILABLE;
 				//la trame est prete à être utilisée
-				if(debug) Serial.println("\nFRAME END RECEIVED");
+				//if(debug) Serial.println("\nFRAME END RECEIVED");
 				break;
 			case END_OF_TEXT:
-				Serial.println("FRAME INTERRUPTED");
+				//Serial.println("FRAME INTERRUPTED");
 				state = STATE_IDLE;
 				break;
 			default:
@@ -128,7 +136,7 @@ boolean TeleInfo::readTeleInfo(){
 				switch(state){
 					case STATE_READ_ETIQUETTE:
 						if(charIdx>=8){
-							Serial.print("WARNING: etiquette overflow: "); Serial.println(etiquette);
+							//Serial.print("WARNING: etiquette overflow: "); Serial.println(etiquette);
 							continue;
 						}
 						etiquette[charIdx++] = charIn;
@@ -137,7 +145,7 @@ boolean TeleInfo::readTeleInfo(){
 						break;
 					case STATE_READ_DATA:
 						if(charIdx>=12){
-							Serial.print("WARNING: data overflow: "); Serial.println(etiquette);
+							//Serial.print("WARNING: data overflow: "); Serial.println(etiquette);
 							continue;
 						}
 						data[charIdx++] = charIn;
@@ -148,7 +156,7 @@ boolean TeleInfo::readTeleInfo(){
 						//on vérifie le checksum
 						checksum = (checksum & 0x03F) +0x20;	//On ne conserve que les 6 bits de poids faible dans le checksum
 						if(checksum != charIn){
-							Serial.print("Checksum ERROR"); Serial.print(charIn); Serial.print("!="); Serial.println(checksum);
+							//Serial.print("Checksum ERROR "); Serial.print(charIn); Serial.print("!="); Serial.println(checksum);
 							state = STATE_ERROR;
 						}
 						break;
@@ -217,12 +225,12 @@ void TeleInfo::handleGroup(){
 void TeleInfo::displayTeleInfo()
 {
 	Serial.println("display :");
-	if(ADCO[0]    != '\0'){ Serial.print("ADCO    ="); Serial.println(ADCO);}		// adresse compteur
+	if(ADCO[0]    != '\0'){ Serial.print("ADCO    ="); Serial.println(ADCO);}	// adresse compteur
 	if(OPTARIF[0] != '\0'){ Serial.print("OPTARIF ="); Serial.println(OPTARIF);}	// option tarifaire
 	if(ISOUSC     >= 0){    Serial.print("ISOUSC  ="); Serial.println(ISOUSC);} 	// intensité souscrite (A)
-	if(BASE       >= 0){    Serial.print("BASE    ="); Serial.println(BASE);}		// compteur option Base (Wh)
-	if(HCHC       >= 0){    Serial.print("HCHC    ="); Serial.println(HCHC);}		// compteur HC  heure pleine (Wh)
-	if(HCHP       >= 0){    Serial.print("HCHP    ="); Serial.println(HCHP);}		// compteur HC  heure creuse (Wh)
+	if(BASE       >= 0){    Serial.print("BASE    ="); Serial.println(BASE);}	// compteur option Base (Wh)
+	if(HCHC       >= 0){    Serial.print("HCHC    ="); Serial.println(HCHC);}	// compteur HC  heure pleine (Wh)
+	if(HCHP       >= 0){    Serial.print("HCHP    ="); Serial.println(HCHP);}	// compteur HC  heure creuse (Wh)
 	if(EJPHN      >= 0){    Serial.print("EJPHN   ="); Serial.println(EJPHN);}	// compteur EJP heures normales (Wh)
 	if(EJPHPM     >= 0){    Serial.print("EJPHPM  ="); Serial.println(EJPHPM);}	// compteur EJP heures de pointe (Wh)
 	if(BBRHCJB    >= 0){    Serial.print("BBRHCJB ="); Serial.println(BBRHCJB);}	// compteur TEMPO Heures Creuses Bleu (Wh)
@@ -231,15 +239,15 @@ void TeleInfo::displayTeleInfo()
 	if(BBRHPJW    >= 0){    Serial.print("BBRHPJW ="); Serial.println(BBRHPJW);}	// compteur TEMPO Heures Pleines Blanc (Wh)
 	if(BBRHCJR    >= 0){    Serial.print("BBRHCJR ="); Serial.println(BBRHCJR);}	// compteur TEMPO Heures Creuses Rouge (Wh)
 	if(BBRHPJR    >= 0){    Serial.print("BBRHPJR ="); Serial.println(BBRHPJR);}	// compteur TEMPO Heures Pleines Rouge (Wh)
-	if(PEJP       >= 0){    Serial.print("PEJP    ="); Serial.println(PEJP);}		// préavis debut EJP (min, 30 max)
-	if(PTEC[0]    != '\0'){ Serial.print("PTEC    ="); Serial.println(PTEC);}		// Période tarifaire en cours : HPJB, HCJB, HPJW, HCJW, HPJR, HCJR
+	if(PEJP       >= 0){    Serial.print("PEJP    ="); Serial.println(PEJP);}	// préavis debut EJP (min, 30 max)
+	if(PTEC[0]    != '\0'){ Serial.print("PTEC    ="); Serial.println(PTEC);}	// Période tarifaire en cours : HPJB, HCJB, HPJW, HCJW, HPJR, HCJR
 	if(DEMAIN[0]  != '\0'){ Serial.print("DEMAIN  ="); Serial.println(DEMAIN);}	// Couleur du lendemain (BLEU,BLAN,ROUG)
 	if(IINST      >= 0)   { Serial.print("IINST   ="); Serial.println(IINST);}	// intensité instantanée(A)
-	if(ADPS       >= 0)   { Serial.print("ADPS    ="); Serial.println(ADPS);}		// Avertissement dépassement de puissance souscrite (A)
-	if(IMAX       >= 0)   { Serial.print("IMAX    ="); Serial.println(IMAX);}		// intensité maxi appelée (A)
+	if(ADPS       >= 0)   { Serial.print("ADPS    ="); Serial.println(ADPS);}	// Avertissement dépassement de puissance souscrite (A)
+	if(IMAX       >= 0)   { Serial.print("IMAX    ="); Serial.println(IMAX);}	// intensité maxi appelée (A)
 	if(HHPHC      >= 0)   { Serial.print("HHPHC   ="); Serial.println(HHPHC);}	// Horaire heure pleine heure creuse
 	if(MOTDETAT[0]!= '\0'){ Serial.print("MOTDETAT="); Serial.println(MOTDETAT);} 			
-	if(PAPP       >= 0)   { Serial.print("PAPP    ="); Serial.println(PAPP);	}	// Puissance apparente (W)
+	if(PAPP       >= 0)   { Serial.print("PAPP    ="); Serial.println(PAPP);}	// Puissance apparente (W)
 	/*
 	IINST2 = -1;		// intensité instantanée(A) phase 2
 	IINST3 = -1;		// intensité instantanée(A) phase 3

@@ -8,9 +8,8 @@ int charIdx;
 //=================================================================================================================
 // Constructeur
 //=================================================================================================================
-TeleInfo::TeleInfo(byte rxPin, byte txPin){
-	mySerial = new SoftwareSerial(rxPin,txPin); // RX, TX
-	mySerial->begin(1200);
+TeleInfo::TeleInfo(byte rxPin){
+	sssBegin(1200,rxPin);
 
 	debug = false;
 
@@ -20,7 +19,6 @@ TeleInfo::TeleInfo(byte rxPin, byte txPin){
 	OPTARIF = new char[5];
 	PTEC = new char[5];
 	DEMAIN = new char[5];
-	MOTDETAT = new char[7];
 	PPOT = new char[3];
 
 
@@ -51,8 +49,7 @@ void TeleInfo::resetData(){
 	IINST = -1;		// intensité instantanée(A)
 	ADPS = -1;		// Avertissement dépassement de puissance souscrite (A)
 	IMAX = -1;		// intensité maxi appelée (A)
-	HHPHC = -1;		// Horaire heure pleine heure creuse
-	MOTDETAT[0] = '\0'; 			
+	HHPHC = -1;		// Horaire heure pleine heure creuse			
 	PAPP = -1;		// Puissance apparente
 	//Triphasé
 	IINST2 = -1;		// intensité instantanée(A) phase 2
@@ -73,15 +70,17 @@ void TeleInfo::resetData(){
 boolean TeleInfo::readTeleInfo(){
 	char charIn=0;
 
-	if(mySerial->overflow()){
+/*
+	if(sssOverflow()){
 		//SoftwareSerial overflow. On réinitialise au préalable
 		resetData();
 	}
+*/
 	
 	// tant que des octets sont disponibles en lecture : on lit les caractères
 	// Il est possible que la lecture ait commencé dans un appel précédent de la methode
-	while (mySerial->available()) {
-		charIn = mySerial->read() & 0x7F;
+	while (sssAvailable()) {
+		charIn = sssRead() & 0x7F;
 		if(state == STATE_IDLE && charIn != START_FRAME){
 			//La frame n'est pas commencée
 			continue;
@@ -113,22 +112,22 @@ boolean TeleInfo::readTeleInfo(){
 						charIdx = 0;	
 						break;
 					default:
-						//Serial.print("WARNING: separateur en etat "); Serial.println(state);
+						Serial.print(F("WARNING: separateur en etat ")); Serial.println(state);
 						break;
 				}
 				break;
 			case END_GROUP:
 				state = STATE_GROUP_END;
 				handleGroup();
-				//Serial.print("Received group: "); Serial.print(etiquette); Serial.print(":"); Serial.println(data);
+				Serial.print(F("Received group: ")); Serial.print(etiquette); Serial.print(":"); Serial.println(data);
 				break;
 			case END_FRAME:
 				state = STATE_FRAME_AVAILABLE;
 				//la trame est prete à être utilisée
-				//if(debug) Serial.println("\nFRAME END RECEIVED");
+				if(debug) Serial.println(F("\nFRAME END RECEIVED"));
 				break;
 			case END_OF_TEXT:
-				//Serial.println("FRAME INTERRUPTED");
+				Serial.println(F("FRAME INTERRUPTED"));
 				state = STATE_IDLE;
 				break;
 			default:
@@ -136,7 +135,7 @@ boolean TeleInfo::readTeleInfo(){
 				switch(state){
 					case STATE_READ_ETIQUETTE:
 						if(charIdx>=8){
-							//Serial.print("WARNING: etiquette overflow: "); Serial.println(etiquette);
+							Serial.print(F("WARNING: etiquette overflow: ")); Serial.println(etiquette);
 							continue;
 						}
 						etiquette[charIdx++] = charIn;
@@ -145,7 +144,7 @@ boolean TeleInfo::readTeleInfo(){
 						break;
 					case STATE_READ_DATA:
 						if(charIdx>=12){
-							//Serial.print("WARNING: data overflow: "); Serial.println(etiquette);
+							Serial.print(F("WARNING: data overflow: ")); Serial.println(etiquette);
 							continue;
 						}
 						data[charIdx++] = charIn;
@@ -156,7 +155,7 @@ boolean TeleInfo::readTeleInfo(){
 						//on vérifie le checksum
 						checksum = (checksum & 0x03F) +0x20;	//On ne conserve que les 6 bits de poids faible dans le checksum
 						if(checksum != charIn){
-							//Serial.print("Checksum ERROR "); Serial.print(charIn); Serial.print("!="); Serial.println(checksum);
+							Serial.print(F("Checksum ERROR ")); Serial.print(charIn); Serial.print("!="); Serial.println(checksum);
 							state = STATE_ERROR;
 						}
 						break;
@@ -203,51 +202,8 @@ void TeleInfo::handleGroup(){
 	if(strcmp(etiquette,"IINST")   == 0) IINST   = atol(data);	// intensité instantanée(A)
 	if(strcmp(etiquette,"ADPS")    == 0) ADPS    = atol(data);	// Avertissement dépassement de puissance souscrite (A)
 	if(strcmp(etiquette,"IMAX")    == 0) IMAX    = atol(data);	// intensité maxi appelée (A)
-	if(strcmp(etiquette,"HHPHC")   == 0) HHPHC   = data[0];		// Horaire heure pleine heure creuse
-	if(strcmp(etiquette,"MOTDETAT")== 0) strcpy(MOTDETAT,data); 			
+	if(strcmp(etiquette,"HHPHC")   == 0) HHPHC   = data[0];		// Horaire heure pleine heure creuse		
 	if(strcmp(etiquette,"PAPP")    == 0) PAPP    = atol(data);	// Puissance apparente
-	/*
-	IINST2 = -1;		// intensité instantanée(A) phase 2
-	IINST3 = -1;		// intensité instantanée(A) phase 3
-	IMAX2 = -1;		// intensité maxi appelée (A) phase 2
-	IMAX3 = -1;		// intensité maxi appelée (A) phase 3
-	PPOT = -1;		// Présence des potentiels codage hexa (voir doc)
-	ADIR1 = -1;		// Avertissement dépassement d'intensité de réglage phase 1 (A)
-	ADIR2 = -1;		// Avertissement dépassement d'intensité de réglage phase 2 (A)
-	ADIR3 = -1;		// Avertissement dépassement d'intensité de réglage phase 3 (A)
-	*/
-}
-
-//=================================================================================================================
-// This function displays the TeleInfo Internal counters
-// It's usefull for debug purpose
-//=================================================================================================================
-void TeleInfo::displayTeleInfo()
-{
-	Serial.println("display :");
-	if(ADCO[0]    != '\0'){ Serial.print("ADCO    ="); Serial.println(ADCO);}	// adresse compteur
-	if(OPTARIF[0] != '\0'){ Serial.print("OPTARIF ="); Serial.println(OPTARIF);}	// option tarifaire
-	if(ISOUSC     >= 0){    Serial.print("ISOUSC  ="); Serial.println(ISOUSC);} 	// intensité souscrite (A)
-	if(BASE       >= 0){    Serial.print("BASE    ="); Serial.println(BASE);}	// compteur option Base (Wh)
-	if(HCHC       >= 0){    Serial.print("HCHC    ="); Serial.println(HCHC);}	// compteur HC  heure pleine (Wh)
-	if(HCHP       >= 0){    Serial.print("HCHP    ="); Serial.println(HCHP);}	// compteur HC  heure creuse (Wh)
-	if(EJPHN      >= 0){    Serial.print("EJPHN   ="); Serial.println(EJPHN);}	// compteur EJP heures normales (Wh)
-	if(EJPHPM     >= 0){    Serial.print("EJPHPM  ="); Serial.println(EJPHPM);}	// compteur EJP heures de pointe (Wh)
-	if(BBRHCJB    >= 0){    Serial.print("BBRHCJB ="); Serial.println(BBRHCJB);}	// compteur TEMPO Heures Creuses Bleu (Wh)
-	if(BBRHPJB    >= 0){    Serial.print("BBRHPJB ="); Serial.println(BBRHPJB);}	// compteur TEMPO Heures Pleines Bleu (Wh)
-	if(BBRHCJW    >= 0){    Serial.print("BBRHCJW ="); Serial.println(BBRHCJW);}	// compteur TEMPO Heures Creuses Blanc (Wh)
-	if(BBRHPJW    >= 0){    Serial.print("BBRHPJW ="); Serial.println(BBRHPJW);}	// compteur TEMPO Heures Pleines Blanc (Wh)
-	if(BBRHCJR    >= 0){    Serial.print("BBRHCJR ="); Serial.println(BBRHCJR);}	// compteur TEMPO Heures Creuses Rouge (Wh)
-	if(BBRHPJR    >= 0){    Serial.print("BBRHPJR ="); Serial.println(BBRHPJR);}	// compteur TEMPO Heures Pleines Rouge (Wh)
-	if(PEJP       >= 0){    Serial.print("PEJP    ="); Serial.println(PEJP);}	// préavis debut EJP (min, 30 max)
-	if(PTEC[0]    != '\0'){ Serial.print("PTEC    ="); Serial.println(PTEC);}	// Période tarifaire en cours : HPJB, HCJB, HPJW, HCJW, HPJR, HCJR
-	if(DEMAIN[0]  != '\0'){ Serial.print("DEMAIN  ="); Serial.println(DEMAIN);}	// Couleur du lendemain (BLEU,BLAN,ROUG)
-	if(IINST      >= 0)   { Serial.print("IINST   ="); Serial.println(IINST);}	// intensité instantanée(A)
-	if(ADPS       >= 0)   { Serial.print("ADPS    ="); Serial.println(ADPS);}	// Avertissement dépassement de puissance souscrite (A)
-	if(IMAX       >= 0)   { Serial.print("IMAX    ="); Serial.println(IMAX);}	// intensité maxi appelée (A)
-	if(HHPHC      >= 0)   { Serial.print("HHPHC   ="); Serial.println(HHPHC);}	// Horaire heure pleine heure creuse
-	if(MOTDETAT[0]!= '\0'){ Serial.print("MOTDETAT="); Serial.println(MOTDETAT);} 			
-	if(PAPP       >= 0)   { Serial.print("PAPP    ="); Serial.println(PAPP);}	// Puissance apparente (W)
 	/*
 	IINST2 = -1;		// intensité instantanée(A) phase 2
 	IINST3 = -1;		// intensité instantanée(A) phase 3

@@ -4,7 +4,7 @@
 #define nodebug
 
 #include "Arduino.h"
-#include <SoftwareSerial.h>
+#include "SoftSerial.h"
 
 #define START_FRAME 0x02				//Debut de trame
 #define END_FRAME 0x03					//Fin de trame
@@ -24,7 +24,7 @@
 
 class TeleInfo {
 public:
-	TeleInfo(byte rxPin, byte txPin);
+	TeleInfo(byte rxPin);
 	boolean readTeleInfo();
 	boolean isFrameAvailable();
 	void displayTeleInfo();
@@ -55,7 +55,6 @@ public:
 	int ADPS;				// Avertissement dépassement de puissance souscrite (A)
 	int IMAX;				// intensité maxi appelée (A)
 	char HHPHC;				// Horaire heure pleine heure creuse
-	char* MOTDETAT;				// Mode etat du compteur
 	int PAPP;				// Puissance apparente (VA) (seulement sur compteurs evolution)
 
 	//Pour les compteurs triphasés / trames longues
@@ -70,8 +69,8 @@ public:
 	int ADIR1;				// Avertissement dépassement d'intensité de réglage phase 1 (A)
 	int ADIR2;				// Avertissement dépassement d'intensité de réglage phase 2 (A)
 	int ADIR3;				// Avertissement dépassement d'intensité de réglage phase 3 (A)
+	
 private :
-	SoftwareSerial* mySerial;
 	byte state;				//Etat courant
 	boolean debug;
 

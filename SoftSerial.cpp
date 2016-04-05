@@ -159,11 +159,12 @@ char sssPrepareToListen() {
       pinChangeInterruptEnable(sssRxPin);
 
       sssIsListening = true;
+      sssDbg("LISTENING:  ", sssIsListening);
       break;
     }
     delayMicroseconds(sssIdleDelay);
   }
-  sssDbg("LISTENING:  ", sssIsListening);
+  
   return sssIsListening;
 }
 

@@ -1,4 +1,5 @@
 #include "TeleInfo.h"
+//#define DEBUG_TELEINFO
 
 char etiquette[9];
 char data[13];
@@ -20,15 +21,14 @@ TeleInfo::TeleInfo(byte rxPin){
 	PTEC = new char[5];
 	DEMAIN = new char[5];
 	PPOT = new char[3];
-
-
-	resetData();
+	
+	reset();
 }
 
 /**
  * Réinitialise les données
  */
-void TeleInfo::resetData(){
+void TeleInfo::reset(){
 	ADCO[0] = '\0';		// adresse compteur
 	OPTARIF[0] = '\0';	// option tarifaire
 	ISOUSC = -1;		// intensité souscrite (A)
@@ -79,91 +79,100 @@ boolean TeleInfo::readTeleInfo(){
 	
 	// tant que des octets sont disponibles en lecture : on lit les caractères
 	// Il est possible que la lecture ait commencé dans un appel précédent de la methode
-	while (sssAvailable()) {
+	while (sssAvailable()>0) {
 		charIn = sssRead() & 0x7F;
+		//Serial.print(charIn);
+		
 		if(state == STATE_IDLE && charIn != START_FRAME){
 			//La frame n'est pas commencée
 			continue;
 		}
 
-		switch(charIn){
-			case START_FRAME:
+		if(charIn == START_FRAME){
 				if(state != STATE_IDLE && state != STATE_FRAME_AVAILABLE){ Serial.print("WARNING: START_FRAME en etat "); Serial.println(state); }
 				//On initialise les variables pour la Frame
-				resetData();
+				reset();
 				state = STATE_FRAME_STARTED;
-				break;
-			case START_GROUP:
+		}
+		else if(charIn == START_GROUP){
 				etiquette[0] = '\0';
 				data[0] = '\0';
 				checksum = 0;
 				charIdx = 0;
 				state = STATE_READ_ETIQUETTE;
-				break;
-			case CHAR_SEPARATEUR:
-				switch(state){
-					case STATE_READ_ETIQUETTE:
-						state = STATE_READ_DATA;
-						charIdx = 0;
-						checksum += charIn;	//Le separateur fait partie du checksum
-						break;
-					case STATE_READ_DATA:
-						state = STATE_READ_CHECKSUM;
-						charIdx = 0;	
-						break;
-					default:
-						Serial.print(F("WARNING: separateur en etat ")); Serial.println(state);
-						break;
-				}
-				break;
-			case END_GROUP:
+		}
+		else if(charIn == END_GROUP){
 				state = STATE_GROUP_END;
 				handleGroup();
-				Serial.print(F("Received group: ")); Serial.print(etiquette); Serial.print(":"); Serial.println(data);
-				break;
-			case END_FRAME:
+				#ifdef DEBUG_TELEINFO
+					Serial.print(F("Received group: ")); Serial.print(etiquette); Serial.print(":"); Serial.println(data);
+				#endif
+		}
+		else if(charIn == END_FRAME){
 				state = STATE_FRAME_AVAILABLE;
 				//la trame est prete à être utilisée
-				if(debug) Serial.println(F("\nFRAME END RECEIVED"));
-				break;
-			case END_OF_TEXT:
-				Serial.println(F("FRAME INTERRUPTED"));
+				#ifdef DEBUG_TELEINFO
+					Serial.println(F("\nFRAME END RECEIVED"));
+				#endif
+		}
+		else if(charIn == END_OF_TEXT){
+				if(debug) Serial.println(F("FRAME INTERRUPTED"));
+				reset();
 				state = STATE_IDLE;
-				break;
-			default:
-				//C'est un autre caratere (etiquette, donne ou checksum)
-				switch(state){
-					case STATE_READ_ETIQUETTE:
-						if(charIdx>=8){
-							Serial.print(F("WARNING: etiquette overflow: ")); Serial.println(etiquette);
-							continue;
-						}
-						etiquette[charIdx++] = charIn;
-						etiquette[charIdx] = '\0';
-						checksum += charIn;
-						break;
-					case STATE_READ_DATA:
-						if(charIdx>=12){
+		}
+		else if(charIn == CHAR_SEPARATEUR && state == STATE_READ_ETIQUETTE){
+				charIdx = 0;
+				state = STATE_READ_DATA;
+				checksum += charIn;	//Le separateur fait partie du checksum
+		}
+		else if(charIn == CHAR_SEPARATEUR && state == STATE_READ_DATA){
+				charIdx = 0;
+				state = STATE_READ_CHECKSUM;
+		}
+		else{
+			//C'est 
+			//  -un autre caratere (etiquette, donnee ou checksum), ou bien un espace en état
+			//  -ou bien un espace en état autre que READ_ETIQUETTE ou READ_DATA
+			switch(state){
+				case STATE_READ_ETIQUETTE:
+					if(charIdx>=8){
+						#ifdef DEBUG_TELEINFO
+							Serial.print(F("WARNING: etiquette size error: ")); Serial.println(etiquette);
+						#endif
+						reset();
+						continue;
+					}
+					etiquette[charIdx++] = charIn;
+					etiquette[charIdx] = '\0';
+					checksum += charIn;
+					break;
+				case STATE_READ_DATA:
+					if(charIdx>=12){
+						#ifdef DEBUG_TELEINFO
 							Serial.print(F("WARNING: data overflow: ")); Serial.println(etiquette);
-							continue;
-						}
-						data[charIdx++] = charIn;
-						data[charIdx] = '\0';
-						checksum += charIn;
-						break;
-					case STATE_READ_CHECKSUM:
-						//on vérifie le checksum
-						checksum = (checksum & 0x03F) +0x20;	//On ne conserve que les 6 bits de poids faible dans le checksum
-						if(checksum != charIn){
+						#endif
+						reset();
+						continue;
+					}
+					data[charIdx++] = charIn;
+					data[charIdx] = '\0';
+					checksum += charIn;
+					break;
+				case STATE_READ_CHECKSUM:
+					//on vérifie le checksum
+					checksum = (checksum & 0x03F) +0x20;	//On ne conserve que les 6 bits de poids faible dans le checksum
+					if(checksum != charIn){
+						#ifdef DEBUG_TELEINFO
 							Serial.print(F("Checksum ERROR ")); Serial.print(charIn); Serial.print("!="); Serial.println(checksum);
-							state = STATE_ERROR;
-						}
-						break;
-					default:
-						//On ignore les caracteres recus dans les autres etats (mais ce n'est pas normal)
-						break;
-				}
-				break;
+						#endif
+						state = STATE_CHECKSUM_ERROR;
+					}
+					break;
+				default:
+					//On ignore les caracteres recus dans les autres etats (mais ce n'est pas normal)
+					//FRAME_STARTED, GROUP_END, FRAME_AVAILABLE, ERROR
+					break;
+			}
 		}
 	}
 	
@@ -214,8 +223,4 @@ void TeleInfo::handleGroup(){
 	ADIR2 = -1;		// Avertissement dépassement d'intensité de réglage phase 2 (A)
 	ADIR3 = -1;		// Avertissement dépassement d'intensité de réglage phase 3 (A)
 	*/
-}
-
-void TeleInfo::setDebug(boolean d){
-	debug = d;
 }
